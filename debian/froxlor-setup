@@ -1,6 +1,5 @@
 #!/bin/bash
-# /usr/bin/froxlor-setup
-# Interaktives Setup-Skript für Froxlor nach der Installation
+# /usr/bin/froxlor-setup — Interaktiver Setup-Assistent für Froxlor v3
 
 set -e
 
@@ -10,14 +9,31 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
-NC='\033[0m'
 BOLD='\033[1m'
+NC='\033[0m'
 
 if [ "$(id -u)" != "0" ]; then
     echo -e "${RED}Fehler: Dieses Skript muss als root ausgeführt werden.${NC}"
     echo "Nutze: sudo froxlor-setup"
     exit 1
 fi
+
+# Setzt oder überschreibt einen .env-Schlüssel (funktioniert auch bei auskommentierten Zeilen)
+set_env() {
+    local key="$1"
+    local value="$2"
+    # Sonderzeichen für sed escapen
+    local escaped_value
+    escaped_value=$(printf '%s' "$value" | sed 's/[\/&|]/\\&/g')
+
+    if grep -qE "^${key}=" "$ENV_FILE" 2>/dev/null; then
+        sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$ENV_FILE"
+    elif grep -qE "^# ${key}=" "$ENV_FILE" 2>/dev/null; then
+        sed -i "s|^# ${key}=.*|${key}=${escaped_value}|" "$ENV_FILE"
+    else
+        echo "${key}=${value}" >> "$ENV_FILE"
+    fi
+}
 
 echo ""
 echo -e "${CYAN}${BOLD}Froxlor v3 — Setup-Assistent${NC}"
@@ -28,15 +44,24 @@ echo ""
 echo -e "${YELLOW}Datenbank-Konfiguration${NC}"
 echo ""
 
-read -p "Datenbank-Typ [mysql/pgsql/sqlite] (Standard: mysql): " DB_CONNECTION
-DB_CONNECTION=${DB_CONNECTION:-mysql}
+read -p "Datenbank-Typ [mysql/pgsql/sqlite] (Standard: sqlite): " DB_CONNECTION
+DB_CONNECTION=${DB_CONNECTION:-sqlite}
 
-if [ "$DB_CONNECTION" != "sqlite" ]; then
+if [ "$DB_CONNECTION" = "sqlite" ]; then
+    DB_DATABASE="$FROXLOR_DIR/database/database.sqlite"
+    mkdir -p "$FROXLOR_DIR/database"
+    touch "$DB_DATABASE"
+    chown www-data:www-data "$DB_DATABASE"
+    echo -e "${GREEN}SQLite-Datei: ${DB_DATABASE}${NC}"
+elif [ "$DB_CONNECTION" = "mysql" ] || [ "$DB_CONNECTION" = "pgsql" ]; then
+    DEFAULT_PORT=3306
+    [ "$DB_CONNECTION" = "pgsql" ] && DEFAULT_PORT=5432
+
     read -p "Datenbank-Host (Standard: 127.0.0.1): " DB_HOST
     DB_HOST=${DB_HOST:-127.0.0.1}
 
-    read -p "Datenbank-Port (Standard: 3306): " DB_PORT
-    DB_PORT=${DB_PORT:-3306}
+    read -p "Datenbank-Port (Standard: ${DEFAULT_PORT}): " DB_PORT
+    DB_PORT=${DB_PORT:-${DEFAULT_PORT}}
 
     read -p "Datenbank-Name (Standard: froxlor): " DB_DATABASE
     DB_DATABASE=${DB_DATABASE:-froxlor}
@@ -46,44 +71,94 @@ if [ "$DB_CONNECTION" != "sqlite" ]; then
 
     read -s -p "Datenbank-Passwort: " DB_PASSWORD
     echo ""
+
+    # Verbindung testen
+    echo ""
+    echo -e "${CYAN}Datenbankverbindung wird geprüft...${NC}"
+    if [ "$DB_CONNECTION" = "mysql" ]; then
+        if ! mysqladmin ping -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USERNAME" -p"$DB_PASSWORD" --silent 2>/dev/null; then
+            echo -e "${RED}✗ Verbindung fehlgeschlagen!${NC}"
+            echo ""
+            echo "Mögliche Ursachen:"
+            echo "  • MySQL/MariaDB ist nicht installiert oder läuft nicht"
+            echo "  • Falsche Zugangsdaten"
+            echo ""
+            if ! command -v mysql &>/dev/null; then
+                echo -e "${YELLOW}MySQL/MariaDB wurde nicht gefunden.${NC}"
+                read -p "MariaDB jetzt installieren? [j/N]: " INSTALL_MARIADB
+                if [ "${INSTALL_MARIADB,,}" = "j" ] || [ "${INSTALL_MARIADB,,}" = "y" ]; then
+                    echo -e "${CYAN}MariaDB wird installiert...${NC}"
+                    apt-get -y install mariadb-server > /dev/null 2>&1
+                    systemctl enable --now mariadb
+                    echo -e "${GREEN}✓ MariaDB installiert und gestartet${NC}"
+                    echo ""
+                    echo -e "${YELLOW}Datenbank '${DB_DATABASE}' und Benutzer '${DB_USERNAME}' werden angelegt...${NC}"
+                    mysql -u root -e "
+                        CREATE DATABASE IF NOT EXISTS \`${DB_DATABASE}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+                        CREATE USER IF NOT EXISTS '${DB_USERNAME}'@'${DB_HOST}' IDENTIFIED BY '${DB_PASSWORD}';
+                        GRANT ALL PRIVILEGES ON \`${DB_DATABASE}\`.* TO '${DB_USERNAME}'@'${DB_HOST}';
+                        FLUSH PRIVILEGES;
+                    " 2>/dev/null || true
+                    echo -e "${GREEN}✓ Datenbank und Benutzer angelegt${NC}"
+                else
+                    echo -e "${RED}Abbruch. Bitte MySQL/MariaDB manuell einrichten und erneut ausführen.${NC}"
+                    exit 1
+                fi
+            else
+                echo -e "${RED}Bitte Zugangsdaten prüfen und froxlor-setup erneut ausführen.${NC}"
+                exit 1
+            fi
+        else
+            echo -e "${GREEN}✓ Datenbankverbindung erfolgreich${NC}"
+        fi
+    fi
+else
+    echo -e "${RED}Ungültiger Datenbank-Typ: ${DB_CONNECTION}${NC}"
+    exit 1
 fi
 
 # --- .env aktualisieren ---
 echo ""
 echo -e "${CYAN}Konfiguration wird gespeichert...${NC}"
 
+set_env "DB_CONNECTION" "$DB_CONNECTION"
+set_env "DB_DATABASE"   "$DB_DATABASE"
+
 if [ "$DB_CONNECTION" != "sqlite" ]; then
-    sed -i "s|^DB_CONNECTION=.*|DB_CONNECTION=${DB_CONNECTION}|" "$ENV_FILE"
-    sed -i "s|^DB_HOST=.*|DB_HOST=${DB_HOST}|" "$ENV_FILE"
-    sed -i "s|^DB_PORT=.*|DB_PORT=${DB_PORT}|" "$ENV_FILE"
-    sed -i "s|^DB_DATABASE=.*|DB_DATABASE=${DB_DATABASE}|" "$ENV_FILE"
-    sed -i "s|^DB_USERNAME=.*|DB_USERNAME=${DB_USERNAME}|" "$ENV_FILE"
-    sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=${DB_PASSWORD}|" "$ENV_FILE"
+    set_env "DB_HOST"     "$DB_HOST"
+    set_env "DB_PORT"     "$DB_PORT"
+    set_env "DB_USERNAME" "$DB_USERNAME"
+    set_env "DB_PASSWORD" "$DB_PASSWORD"
 fi
 
-sed -i "s|^APP_ENV=.*|APP_ENV=production|" "$ENV_FILE"
-sed -i "s|^APP_DEBUG=.*|APP_DEBUG=false|" "$ENV_FILE"
+set_env "APP_ENV"   "production"
+set_env "APP_DEBUG" "false"
 
-read -p "App-URL (Standard: http://$(hostname -I | awk '{print $1}')): " APP_URL
-APP_URL=${APP_URL:-http://$(hostname -I | awk '{print $1}')}
-sed -i "s|^APP_URL=.*|APP_URL=${APP_URL}|" "$ENV_FILE"
+DEFAULT_URL="http://$(hostname -I | awk '{print $1}')"
+read -p "App-URL (Standard: ${DEFAULT_URL}): " APP_URL
+APP_URL=${APP_URL:-${DEFAULT_URL}}
+set_env "APP_URL" "$APP_URL"
+
+# Laravel config cache leeren, damit neue .env sofort gelesen wird
+sudo -u www-data php "$FROXLOR_DIR/artisan" config:clear --quiet 2>/dev/null || true
 
 # --- Migrationen ausführen ---
 echo ""
 echo -e "${CYAN}Datenbanktabellen werden erstellt...${NC}"
 sudo -u www-data php "$FROXLOR_DIR/artisan" migrate --force
 
-# --- Cache leeren und neu aufbauen ---
+# --- Cache aufbauen ---
 echo -e "${CYAN}Cache wird optimiert...${NC}"
-sudo -u www-data php "$FROXLOR_DIR/artisan" config:cache
-sudo -u www-data php "$FROXLOR_DIR/artisan" route:cache
-sudo -u www-data php "$FROXLOR_DIR/artisan" view:cache
+sudo -u www-data php "$FROXLOR_DIR/artisan" config:cache --quiet
+sudo -u www-data php "$FROXLOR_DIR/artisan" route:cache --quiet
+sudo -u www-data php "$FROXLOR_DIR/artisan" view:cache --quiet
 
 # --- Admin-Account erstellen ---
 echo ""
 echo -e "${YELLOW}Administrator-Account erstellen${NC}"
 echo ""
-read -p "Name des Administrators (Standard: Administrator): " ADMIN_NAME
+
+read -p "Name (Standard: Administrator): " ADMIN_NAME
 ADMIN_NAME=${ADMIN_NAME:-Administrator}
 
 read -p "E-Mail-Adresse: " ADMIN_EMAIL
@@ -113,13 +188,13 @@ systemctl start froxlor-queue.service 2>/dev/null || true
 # --- Fertig ---
 echo ""
 echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}${BOLD}║            Setup erfolgreich abgeschlossen!      ║${NC}"
+echo -e "${GREEN}${BOLD}║          Setup erfolgreich abgeschlossen!        ║${NC}"
 echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  ${CYAN}Admin-Panel:${NC}  ${APP_URL}/admin"
 echo -e "  ${CYAN}Login:${NC}        ${ADMIN_EMAIL}"
 echo ""
-echo -e "${YELLOW}Vergiss nicht, den Webserver zu konfigurieren:${NC}"
+echo -e "${YELLOW}Webserver einrichten:${NC}"
 echo "  Apache: cp /etc/froxlor/apache.conf.example /etc/apache2/sites-available/froxlor.conf"
 echo "  Nginx:  cp /etc/froxlor/nginx.conf.example /etc/nginx/sites-available/froxlor"
 echo ""
