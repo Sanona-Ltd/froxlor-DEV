@@ -22,6 +22,13 @@ if [ "$(id -u)" != "0" ]; then
     fail "Dieses Skript muss als root ausgeführt werden. Nutze: sudo bash install.sh"
 fi
 
+# Alten APT-Eintrag entfernen (von einem früheren Installationsversuch)
+if [ -f /etc/apt/sources.list.d/froxlor.list ]; then
+    rm -f /etc/apt/sources.list.d/froxlor.list
+    rm -f /usr/share/keyrings/froxlor.gpg
+    warn "Alter froxlor APT-Eintrag entfernt."
+fi
+
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
 echo -e "${CYAN}║   Froxlor v3.x — Installations-Assistent ║${NC}"
@@ -32,11 +39,18 @@ echo ""
 step "PHP 8.4 Repository hinzufügen..."
 apt -y install software-properties-common > /dev/null 2>&1
 add-apt-repository -y ppa:ondrej/php > /dev/null 2>&1
-apt update -q
-ok "PHP 8.4 Repository bereit"
+ok "PHP 8.4 PPA hinzugefügt"
 
-# --- Abhängigkeiten installieren ---
-step "Abhängigkeiten installieren (PHP, Composer, Git, Node.js)..."
+# --- Node.js 22 über NodeSource ---
+step "Node.js 22 Repository hinzufügen..."
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash - > /dev/null 2>&1
+ok "Node.js 22 Repository hinzugefügt"
+
+# --- apt update (einmalig nach beiden PPAs) ---
+apt update -q 2>&1 | grep -v "^$" || true
+
+# --- PHP + System-Abhängigkeiten ---
+step "PHP 8.4 und Abhängigkeiten installieren..."
 apt -y install \
     git curl \
     php8.4-cli php8.4-fpm \
@@ -46,9 +60,14 @@ apt -y install \
     php8.4-bcmath php8.4-tokenizer \
     php8.4-intl php8.4-readline \
     composer \
-    nodejs npm \
     > /dev/null 2>&1
-ok "Abhängigkeiten installiert"
+ok "PHP 8.4 installiert"
+
+# --- Node.js 22 ---
+step "Node.js 22 installieren..."
+apt -y install nodejs > /dev/null 2>&1
+NODE_VER=$(node --version)
+ok "Node.js ${NODE_VER} installiert"
 
 # --- Froxlor herunterladen ---
 step "Froxlor herunterladen..."
@@ -62,21 +81,16 @@ ok "Quellcode heruntergeladen"
 
 cd "$FROXLOR_DIR"
 
-# --- Composer-Abhängigkeiten ---
+# --- Composer (als root, chown kommt danach) ---
 step "PHP-Abhängigkeiten installieren (composer install)..."
-sudo -u www-data composer install \
-    --no-dev \
-    --optimize-autoloader \
-    --no-interaction \
-    --quiet 2>&1 || \
-composer install \
+COMPOSER_ALLOW_SUPERUSER=1 composer install \
     --no-dev \
     --optimize-autoloader \
     --no-interaction \
     --quiet
 ok "PHP-Abhängigkeiten installiert"
 
-# --- Frontend-Assets bauen ---
+# --- Frontend-Assets (als root, chown kommt danach) ---
 step "Frontend-Assets bauen (npm run build)..."
 npm install --silent
 npm run build --silent
@@ -90,7 +104,7 @@ fi
 php artisan key:generate --force --quiet
 ok ".env konfiguriert"
 
-# --- Dateiberechtigungen ---
+# --- Dateiberechtigungen (nach dem Build setzen) ---
 step "Dateiberechtigungen setzen..."
 chown -R www-data:www-data "$FROXLOR_DIR"
 chmod -R 755 "$FROXLOR_DIR"
@@ -132,7 +146,7 @@ echo -e "${GREEN}╚════════════════════
 echo ""
 echo -e "  Nächste Schritte:"
 echo ""
-echo -e "  ${YELLOW}1.${NC} Datenbank & Domain konfigurieren:"
+echo -e "  ${YELLOW}1.${NC} Datenbank & Admin konfigurieren:"
 echo "     sudo froxlor-setup"
 echo ""
 echo -e "  ${YELLOW}2.${NC} Webserver einrichten:"
