@@ -54,7 +54,7 @@ step "PHP 8.4 und Abhängigkeiten installieren..."
 apt -y install \
     git curl \
     php8.4-cli php8.4-fpm \
-    php8.4-mysql php8.4-pgsql \
+    php8.4-mysql php8.4-pgsql php8.4-sqlite3 \
     php8.4-mbstring php8.4-xml \
     php8.4-curl php8.4-zip \
     php8.4-bcmath php8.4-tokenizer \
