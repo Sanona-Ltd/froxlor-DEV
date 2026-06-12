@@ -13,26 +13,26 @@
 ### 1) APT-Repository hinzufügen
 
 ```bash
-apt -y install apt-transport-https lsb-release ca-certificates curl gnupg
+sudo apt -y install apt-transport-https lsb-release ca-certificates curl gnupg
 
-curl -sSLo /usr/share/keyrings/froxlor.gpg \
+sudo curl -sSLo /usr/share/keyrings/froxlor.gpg \
   https://sanona-ltd.github.io/froxlor-DEV/froxlor.gpg
 
 echo "deb [signed-by=/usr/share/keyrings/froxlor.gpg] \
   https://sanona-ltd.github.io/froxlor-DEV/apt stable main" \
-  > /etc/apt/sources.list.d/froxlor.list
+  | sudo tee /etc/apt/sources.list.d/froxlor.list
 ```
 
 ### 2) System aktualisieren
 
 ```bash
-apt update && apt upgrade
+sudo apt update && sudo apt upgrade
 ```
 
 ### 3) Froxlor installieren
 
 ```bash
-apt install froxlor
+sudo apt install froxlor
 ```
 
 ### 4) Setup abschliessen
@@ -40,7 +40,7 @@ apt install froxlor
 Nach der Installation den interaktiven Assistenten starten:
 
 ```bash
-froxlor-setup
+sudo froxlor-setup
 ```
 
 Der Assistent fragt nach:
@@ -59,22 +59,22 @@ Die Beispiel-Konfigurationen befinden sich nach der Installation unter `/etc/fro
 ### Apache
 
 ```bash
-cp /etc/froxlor/apache.conf.example /etc/apache2/sites-available/froxlor.conf
+sudo cp /etc/froxlor/apache.conf.example /etc/apache2/sites-available/froxlor.conf
 # ServerName und SSL-Pfade anpassen:
-nano /etc/apache2/sites-available/froxlor.conf
-a2enmod rewrite proxy_fcgi ssl
-a2ensite froxlor
-systemctl reload apache2
+sudo nano /etc/apache2/sites-available/froxlor.conf
+sudo a2enmod rewrite proxy_fcgi ssl
+sudo a2ensite froxlor
+sudo systemctl reload apache2
 ```
 
 ### Nginx
 
 ```bash
-cp /etc/froxlor/nginx.conf.example /etc/nginx/sites-available/froxlor
+sudo cp /etc/froxlor/nginx.conf.example /etc/nginx/sites-available/froxlor
 # server_name und SSL-Pfade anpassen:
-nano /etc/nginx/sites-available/froxlor
-ln -s /etc/nginx/sites-available/froxlor /etc/nginx/sites-enabled/froxlor
-nginx -t && systemctl reload nginx
+sudo nano /etc/nginx/sites-available/froxlor
+sudo ln -s /etc/nginx/sites-available/froxlor /etc/nginx/sites-enabled/froxlor
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
 ---
@@ -82,7 +82,7 @@ nginx -t && systemctl reload nginx
 ## Update
 
 ```bash
-apt update && apt upgrade froxlor
+sudo apt update && sudo apt upgrade froxlor
 ```
 
 ---
@@ -90,9 +90,9 @@ apt update && apt upgrade froxlor
 ## Deinstallation
 
 ```bash
-apt remove froxlor
+sudo apt remove froxlor
 # Inklusive Konfiguration:
-apt purge froxlor
+sudo apt purge froxlor
 ```
 
 > **Hinweis:** Die Datei `/var/www/froxlor/.env` und das `storage/`-Verzeichnis (inkl. Datenbank-Daten) werden bei einer Deinstallation nicht automatisch gelöscht.
