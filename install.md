@@ -3,12 +3,30 @@
 ## Systemvoraussetzungen
 
 - Ubuntu 22.04 / 24.04 oder Debian 12
-- PHP 8.4 (wird automatisch als Paketabhängigkeit installiert)
+- PHP 8.4 (wird automatisch installiert)
 - MySQL 8.0+ / MariaDB 10.6+ / PostgreSQL 14+
 
 ---
 
-## Installation
+## Methode A — Direktinstaller (sofort, kein APT-Repo nötig)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Sanona-Ltd/froxlor-DEV/main/install.sh | sudo bash
+```
+
+Danach:
+
+```bash
+sudo froxlor-setup
+```
+
+---
+
+## Methode B — APT-Repository (empfohlen, sobald Workflow einmalig gelaufen ist)
+
+> **Hinweis:** Das APT-Repository wird durch den GitHub Actions Workflow automatisch befüllt.
+> Voraussetzung: GPG-Key als GitHub Secret hinterlegt + GitHub Pages aktiviert.
+> Siehe [.github/GPG_SETUP.md](.github/GPG_SETUP.md)
 
 ### 1) APT-Repository hinzufügen
 
