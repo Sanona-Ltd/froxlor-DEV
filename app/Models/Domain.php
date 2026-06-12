@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Domain extends Model
 {
+    protected $table = 'hosting_domains';
+
     protected $fillable = [
         'user_id',
         'name',

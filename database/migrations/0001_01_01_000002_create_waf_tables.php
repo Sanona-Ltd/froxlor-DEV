@@ -22,7 +22,7 @@ return new class extends Migration
 
         Schema::create('waf_logs', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('domain_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignId('domain_id')->nullable()->constrained('hosting_domains')->nullOnDelete();
             $table->string('ip', 45);
             $table->text('user_agent')->nullable();
             $table->string('action');         // 'passed', 'challenged', 'blocked'
