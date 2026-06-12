@@ -1,0 +1,20 @@
+[Unit]
+Description=Froxlor Queue Worker
+Documentation=https://github.com/Sanona-Ltd/froxlor-DEV
+After=network.target mysql.service mariadb.service postgresql.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/froxlor
+ExecStart=/usr/bin/php artisan queue:work --sleep=3 --tries=3 --max-time=3600 --quiet
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=froxlor-queue
+
+[Install]
+WantedBy=multi-user.target

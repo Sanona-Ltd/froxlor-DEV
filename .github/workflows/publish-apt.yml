@@ -1,0 +1,245 @@
+name: Build & Publish APT Package
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-deb:
+    name: Build .deb package
+    runs-on: ubuntu-24.04
+
+    outputs:
+      deb_file: ${{ steps.build.outputs.deb_file }}
+      version:  ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo '3.0.0-dev')"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building version: $VERSION"
+
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, xml, curl, zip, bcmath, pdo, pdo_mysql, intl, tokenizer
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Composer dependencies
+        run: composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
+
+      - name: Build frontend assets
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build .deb package
+        id: build
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DEB_NAME="froxlor_${VERSION}_all"
+          PKG_ROOT="pkg/${DEB_NAME}"
+
+          # Paketverzeichnis aufbauen
+          mkdir -p "${PKG_ROOT}/DEBIAN"
+          mkdir -p "${PKG_ROOT}/var/www/froxlor"
+          mkdir -p "${PKG_ROOT}/lib/systemd/system"
+          mkdir -p "${PKG_ROOT}/etc/froxlor"
+          mkdir -p "${PKG_ROOT}/usr/bin"
+
+          # App-Dateien kopieren (ohne Dev-Artefakte)
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='pkg' \
+            --exclude='node_modules' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='!.env.example' \
+            --exclude='tests' \
+            --exclude='*.md' \
+            --exclude='debian' \
+            . "${PKG_ROOT}/var/www/froxlor/"
+
+          # DEBIAN control files
+          sed "s/VERSION_PLACEHOLDER/${VERSION}/" debian/control > "${PKG_ROOT}/DEBIAN/control"
+          install -m 755 debian/postinst "${PKG_ROOT}/DEBIAN/postinst"
+          install -m 755 debian/prerm    "${PKG_ROOT}/DEBIAN/prerm"
+          install -m 755 debian/postrm   "${PKG_ROOT}/DEBIAN/postrm"
+          cp debian/conffiles "${PKG_ROOT}/DEBIAN/conffiles"
+
+          # Systemd service
+          install -m 644 debian/froxlor-queue.service \
+            "${PKG_ROOT}/lib/systemd/system/froxlor-queue.service"
+
+          # Webserver-Beispielkonfigs
+          install -m 644 debian/apache.conf.example "${PKG_ROOT}/etc/froxlor/"
+          install -m 644 debian/nginx.conf.example  "${PKG_ROOT}/etc/froxlor/"
+
+          # Setup-Skript
+          install -m 755 debian/froxlor-setup "${PKG_ROOT}/usr/bin/froxlor-setup"
+
+          # Paket bauen
+          dpkg-deb --build --root-owner-group "${PKG_ROOT}" "dists/${DEB_NAME}.deb"
+
+          echo "deb_file=${DEB_NAME}.deb" >> "$GITHUB_OUTPUT"
+          echo "Built: dists/${DEB_NAME}.deb"
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: froxlor-deb
+          path: dists/*.deb
+          retention-days: 30
+
+  publish-apt:
+    name: Publish APT repository to GitHub Pages
+    runs-on: ubuntu-24.04
+    needs: build-deb
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: froxlor-deb
+          path: deb-files/
+
+      - name: Import GPG signing key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | awk '{print $2}' | cut -d'/' -f2 | head -1)
+          echo "GPG_KEY_ID=${GPG_KEY_ID}" >> "$GITHUB_ENV"
+
+      - name: Build APT repository
+        run: |
+          VERSION="${{ needs.build-deb.outputs.version }}"
+          DEB_FILE="deb-files/froxlor_${VERSION}_all.deb"
+
+          mkdir -p apt-repo/pool/main/f/froxlor
+          mkdir -p apt-repo/dists/stable/main/binary-amd64
+          mkdir -p apt-repo/dists/stable/main/binary-all
+
+          # .deb ins Pool kopieren
+          cp "${DEB_FILE}" apt-repo/pool/main/f/froxlor/
+
+          # Packages-Dateien erzeugen
+          cd apt-repo
+          dpkg-scanpackages --arch all pool/ > dists/stable/main/binary-all/Packages
+          gzip -k dists/stable/main/binary-all/Packages
+          xz -k dists/stable/main/binary-all/Packages
+
+          # Release-Datei
+          cat > dists/stable/Release <<RELEASE
+          Origin: Froxlor by Sanona Ltd
+          Label: Froxlor
+          Suite: stable
+          Codename: stable
+          Version: ${VERSION}
+          Date: $(date -Ru)
+          Architectures: all
+          Components: main
+          Description: Froxlor Web Hosting Control Panel
+          RELEASE
+
+          # Checksums hinzufügen
+          for file in $(find dists/stable/main -type f | sed 's|dists/stable/||'); do
+            MD5=$(md5sum "dists/stable/${file}" | cut -d' ' -f1)
+            SHA1=$(sha1sum "dists/stable/${file}" | cut -d' ' -f1)
+            SHA256=$(sha256sum "dists/stable/${file}" | cut -d' ' -f1)
+            SIZE=$(stat -c%s "dists/stable/${file}")
+            echo " ${MD5} ${SIZE} ${file}" >> dists/stable/Release
+            echo " ${SHA1} ${SIZE} ${file}" >> dists/stable/SHA1sums_tmp
+            echo " ${SHA256} ${SIZE} ${file}" >> dists/stable/SHA256sums_tmp
+          done
+
+          # Release signieren
+          gpg --batch --yes --armor --detach-sign \
+            -o dists/stable/Release.gpg \
+            --local-user "${GPG_KEY_ID}" \
+            dists/stable/Release
+
+          gpg --batch --yes --armor --clearsign \
+            -o dists/stable/InRelease \
+            --local-user "${GPG_KEY_ID}" \
+            dists/stable/Release
+
+          # Öffentlichen GPG-Schlüssel exportieren
+          gpg --armor --export "${GPG_KEY_ID}" > froxlor.gpg
+
+          cd ..
+
+      - name: Create index page
+        run: |
+          VERSION="${{ needs.build-deb.outputs.version }}"
+          cat > apt-repo/index.html <<HTML
+          <!DOCTYPE html>
+          <html lang="de">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Froxlor APT Repository</title>
+              <style>
+                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 760px; margin: 60px auto; padding: 0 20px; color: #111; }
+                  h1 { color: #2563eb; } code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+                  pre { background: #1e1e2e; color: #cdd6f4; padding: 20px; border-radius: 10px; overflow-x: auto; line-height: 1.6; }
+                  .badge { display: inline-block; background: #dbeafe; color: #1d4ed8; padding: 2px 10px; border-radius: 999px; font-size: 0.85em; font-weight: 600; }
+              </style>
+          </head>
+          <body>
+              <h1>froxlor</h1>
+              <p>Offizielles APT Repository <span class="badge">v${VERSION}</span></p>
+              <h2>Installation</h2>
+              <pre># 1) Repository hinzufügen
+          apt -y install apt-transport-https lsb-release ca-certificates curl gnupg
+          curl -sSLo /usr/share/keyrings/froxlor.gpg https://sanona-ltd.github.io/froxlor-DEV/froxlor.gpg
+          echo "deb [signed-by=/usr/share/keyrings/froxlor.gpg] https://sanona-ltd.github.io/froxlor-DEV/apt stable main" > /etc/apt/sources.list.d/froxlor.list
+
+          # 2) System aktualisieren
+          apt update
+
+          # 3) Froxlor installieren
+          apt install froxlor
+
+          # 4) Setup starten
+          froxlor-setup</pre>
+              <p>Quellcode: <a href="https://github.com/Sanona-Ltd/froxlor-DEV">github.com/Sanona-Ltd/froxlor-DEV</a></p>
+          </body>
+          </html>
+          HTML
+
+      - name: Deploy to GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apt-repo/
+
+      - name: Publish Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

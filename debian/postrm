@@ -1,0 +1,23 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+    purge)
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl daemon-reload 2>/dev/null || true
+        fi
+        # .env und storage bleiben erhalten (Datensicherheit)
+        echo "Hinweis: /var/www/froxlor/.env und /var/www/froxlor/storage wurden nicht gelöscht."
+        echo "Zum vollständigen Entfernen: rm -rf /var/www/froxlor"
+    ;;
+
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+    ;;
+
+    *)
+        echo "postrm called with unknown argument '$1'" >&2
+        exit 1
+    ;;
+esac
+
+exit 0

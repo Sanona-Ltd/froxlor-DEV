@@ -1,0 +1,20 @@
+Package: froxlor
+Version: VERSION_PLACEHOLDER
+Architecture: all
+Maintainer: Sanona Ltd <support@sanona.dev>
+Depends: php8.4-cli, php8.4-fpm, php8.4-mysql, php8.4-mbstring, php8.4-xml, php8.4-curl, php8.4-zip, php8.4-bcmath, php8.4-tokenizer, php8.4-intl
+Recommends: mysql-server | mariadb-server, apache2 | nginx
+Suggests: certbot
+Section: web
+Priority: optional
+Homepage: https://github.com/Sanona-Ltd/froxlor-DEV
+Description: Froxlor - Web Hosting Control Panel
+ Froxlor is a lightweight open-source web hosting control panel
+ built on Laravel 12 with Tailwind CSS and Alpine.js.
+ .
+ Features:
+  - Clean admin dashboard and customer panel
+  - Domain management with per-domain webserver selection
+    (Apache, Nginx, OpenLiteSpeed)
+  - Built-in WAF with Cloudflare-style JS challenge protection
+  - IP blacklist, CIDR blocks and User-Agent filtering
